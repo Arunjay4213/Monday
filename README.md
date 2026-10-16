@@ -123,7 +123,7 @@ pip install -r requirements-dev.txt
 python -m pytest tests/ -q
 ```
 
-Passes 22 tests in about 10 seconds on a laptop. All local, no API calls.
+Runs in about 10 seconds on a laptop. All local, no API calls.
 
 The following scripts are not pytest and cost real API money to run:
 
