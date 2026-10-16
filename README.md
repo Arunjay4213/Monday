@@ -1,12 +1,16 @@
 # Monday
 
-Vision-guided assistive grasping prototype for upper motor neuron injury research.
+A vision-guided assistive grasping prototype for upper motor neuron injury research.
 
 ## What this is
 
-A research prototype that helps a patient grip objects by combining a voice trigger, a camera feed, a Claude-based grip planner, and electrical muscle stimulation of three fingers on the dorsal hand. The patient says what they want, the camera sees the scene, Claude picks a grip, the system acknowledges with a short abort window, then fires the EMS channels. Upper motor neuron injury patients can reach for objects but cannot complete the hand closure; Monday closes that gap while the pathway rebuilds.
+People with an upper motor neuron injury can reach for an object but cannot finish closing the hand around it.
+Monday is a research prototype that does the closing for them while the pathway rebuilds.
+It combines a voice trigger, a camera, a grip planner built on Claude, and electrical muscle stimulation (EMS) of three fingers through electrodes on the back of the hand.
+The patient says what they want and the camera captures the scene; Claude picks a grip, and the system speaks an acknowledgement and waits through a short abort window before it fires the EMS channels.
 
-Not a medical device. Research use only, with explicit consent and a physical kill switch inline with the EMS positive lead.
+This is not a medical device.
+It is for research use only, with explicit consent and a physical kill switch inline with the EMS positive lead.
 
 ## Repo layout
 
@@ -34,23 +38,30 @@ python tests/mock_receiver.py &
 python -m app.main
 ```
 
-In the overlay window, press SPACE, type `grab the cup`, and press Enter. Watch the mock receiver terminal log the `/stimulate` POSTs. Press Q or ESC to quit.
+In the overlay window, press SPACE, type `grab the cup`, and press Enter.
+The mock receiver's terminal then logs the `/stimulate` POSTs.
+Press Q or ESC to quit.
 
-`ANTHROPIC_API_KEY` must be set in the environment or in a `.env` file for the brain layer to work. Copy `.env_empty` to `.env` and fill in the key.
+The brain layer needs `ANTHROPIC_API_KEY`, either in the environment or in a `.env` file (copy `.env_empty` to `.env` and fill in the key).
 
 ## Full setup (with hardware)
 
-The end-to-end cold-start procedure lives in [docs/integration_bringup.md](docs/integration_bringup.md). Summary:
+The full cold-start procedure is in [docs/integration_bringup.md](docs/integration_bringup.md).
+In short:
 
-1. **Flash the firmware.** See [firmware/README.md](firmware/README.md) for board settings, pinout, and the bench checklist before any session with a subject.
-2. **Wire the electrodes.** Three dorsal-hand channels (index, middle, pinky metacarpals), shared ground on the wrist, physical kill switch inline with the EMS positive lead. Detailed wiring notes live in [hardware/README.md](hardware/README.md).
-3. **Calibrate.** Run [calibration/stimGUI.py](calibration/stimGUI.py) to find clean twitch placement and the right Belifu dial per channel. Record the session in [hardware/calibration_log.md](hardware/calibration_log.md) and run Verify Safety before every session.
-4. **Bring the Pi services up.** SSH to the Pi and run `./pi/start_services.sh`. Full procedure in the integration guide.
-5. **Bring the laptop up.** Join the phone hotspot, set the three `MONDAY_*_URL` env vars to the Pi's IP, then `python -m app.main`.
+1. Flash the firmware.
+   [firmware/README.md](firmware/README.md) has the board settings, the pinout, and the bench checklist to go through before any session with a subject.
+2. Wire the electrodes: three channels on the back of the hand (over the index, middle, and pinky metacarpals), a shared ground on the wrist, and the physical kill switch inline with the EMS positive lead.
+   The detailed wiring notes are in [hardware/README.md](hardware/README.md).
+3. Calibrate with [calibration/stimGUI.py](calibration/stimGUI.py), which helps find an electrode placement that gives a clean twitch and the right Belifu dial setting for each channel.
+   Record the session in [hardware/calibration_log.md](hardware/calibration_log.md), and run Verify Safety before every session.
+4. Start the Pi services by running `./pi/start_services.sh` on the Pi over SSH (the integration guide has the details).
+5. On the laptop, join the phone hotspot, point the three `MONDAY_*_URL` env vars at the Pi's IP, and run `python -m app.main`.
 
 ## Configuration
 
-Edit [config.yaml](config.yaml) for settings that don't change often (camera resolution, voice wake phrase, confidence scaling, overlay geometry). Environment variables override individual components:
+Settings that rarely change (camera resolution, wake phrase, confidence scaling, overlay geometry) are in [config.yaml](config.yaml).
+These environment variables override individual components:
 
 | variable | default | effect |
 |----------|---------|--------|
@@ -67,39 +78,59 @@ Edit [config.yaml](config.yaml) for settings that don't change often (camera res
 
 ## Hardware constraint: three fingers only
 
-The current EMS harness drives three relays for index, middle, and pinky. The thumb is not actuated. Grip types are defined accordingly (cylindrical = all three on, pinch = index + middle, lateral = middle + pinky). See [docs/known_issues.md](docs/known_issues.md).
+The current EMS harness drives three relays, for the index, middle, and pinky fingers, and the thumb is not actuated.
+The grip types are defined around that: cylindrical turns on all three, pinch uses index and middle, and lateral uses middle and pinky.
+See [docs/known_issues.md](docs/known_issues.md).
 
 ## Troubleshooting
 
 ### Camera
 
-- **Won't open.** Check `/dev/video0` exists and the user is in the `video` group. On WSL2 the host webcam is not forwarded by default. Override the index with `camera_index` in `config.yaml` or `MONDAY_CAMERA_INDEX`.
-- **Three test frames are identical.** Run `python -m app.vision` and compare `/tmp/monday_test_frame_{1,2,3}.jpg`. If they match, the grabber thread is not draining new frames. Usually a driver or buffer-depth quirk.
+If the camera won't open, check that `/dev/video0` exists and that the user is in the `video` group.
+WSL2 does not forward the host webcam by default.
+You can change the index with `camera_index` in `config.yaml` or with `MONDAY_CAMERA_INDEX`.
+
+To check that frames are fresh, run `python -m app.vision` and compare `/tmp/monday_test_frame_{1,2,3}.jpg`.
+If the three are identical, the grabber thread is not draining new frames, which is usually a driver or buffer-depth quirk.
 
 ### Voice
 
-- **"Voice disabled: typing fallback active" on startup.** `faster-whisper`, `sounddevice`, or PortAudio missing. Install per the voice deps section below. The demo still works because `ManualTrigger` fires on SPACE + typed intent.
-- **Nothing triggers when speaking.** Run `python -m app.voice --list-devices` to confirm the mic is visible. Pin it with `MONDAY_AUDIO_INPUT=<index or name>` or `voice.input_device` in `config.yaml`.
-- **Wake phrase misses.** Bump the model (`MONDAY_WHISPER_MODEL=small`) or lower `MONDAY_VAD_THRESHOLD` if the mic has a noisy floor.
-- **Using a phone as the mic.** Install WO Mic on the phone and the matching driver on the laptop. Connect over USB (more reliable than WiFi for live demos). Verify with `--list-devices`, then either make the phone the system default input or pin via `MONDAY_AUDIO_INPUT`. Hold the phone 15 to 30 cm from the mouth.
+"Voice disabled: typing fallback active" at startup means `faster-whisper`, `sounddevice`, or PortAudio is missing; install them as described in the voice dependencies section below.
+The demo still works without them, because `ManualTrigger` fires on SPACE plus a typed intent.
+
+If nothing triggers when you speak, run `python -m app.voice --list-devices` to check that the mic is visible, then pin it with `MONDAY_AUDIO_INPUT=<index or name>` or `voice.input_device` in `config.yaml`.
+
+If the wake phrase is often missed, try a bigger model (`MONDAY_WHISPER_MODEL=small`), or lower `MONDAY_VAD_THRESHOLD` when the mic has a noisy floor.
+
+A phone can work as the mic.
+Install WO Mic on the phone and its driver on the laptop, and connect over USB, which was more reliable than WiFi for live demos.
+Check it shows up with `--list-devices`, then either make the phone the system default input or pin it with `MONDAY_AUDIO_INPUT`.
+Hold the phone 15 to 30 cm from the mouth.
 
 ### TTS
 
-- **No spoken acknowledgements.** `pyttsx3` missing or no audio output device. The orchestrator prints `[TTS] ...` to stdout instead. Safe to ignore for a dry run.
+If there are no spoken acknowledgements, either `pyttsx3` is missing or there is no audio output device.
+The orchestrator prints `[TTS] ...` to stdout instead, which is fine for a dry run.
 
 ### Receiver
 
-- **503 on every request.** Arduino is not reachable. Check the cable, then `dmesg` or `lsusb` for the board. Bridge will retry one reconnect automatically; beyond that you need to restart it.
-- **Arduino not detected.** The bridge looks for VID `0x2341`. Non-genuine boards may use a different VID; set `MONDAY_SERIAL_PORT=/dev/ttyACM0` to bypass auto-detect.
-- **Bridge not responding at all.** Make sure `hardware/receiver.py` or `tests/mock_receiver.py` is running on the URL in `config.yaml` (default `http://127.0.0.1:5001`).
+A 503 on every request means the bridge cannot reach the Arduino.
+Check the cable, then look for the board in `dmesg` or `lsusb`.
+The bridge retries one reconnect by itself; after that it needs a restart.
+
+The bridge finds the Arduino by VID `0x2341`.
+Non-genuine boards may use a different VID, so if the board is not detected, set `MONDAY_SERIAL_PORT=/dev/ttyACM0` to skip auto-detection.
+
+If the bridge does not respond at all, make sure `hardware/receiver.py` or `tests/mock_receiver.py` is running on the URL in `config.yaml` (default `http://127.0.0.1:5001`).
 
 ### Overlay
 
-- **`cv2.error` or window does not open.** You are running in a headless environment. `app.main` needs a real display or X-forwarding. Use `tests/test_orchestrator_integration.py` instead for state-machine smoke testing without a window.
+A `cv2.error`, or a window that never opens, means you are in a headless environment.
+`app.main` needs a real display or X forwarding; for smoke-testing the state machine without a window, use `tests/test_orchestrator_integration.py` instead.
 
 ### Voice and vision dependencies
 
-Not everyone needs these. Installed via `requirements.txt` but skip the install if the target machine is headless or has no mic.
+`requirements.txt` installs these, but you can skip them on a machine that is headless or has no mic.
 
 ```bash
 pip install faster-whisper sounddevice
@@ -114,7 +145,8 @@ sudo apt install libportaudio2   # Linux system package needed by sounddevice
 | `requirements-dev.txt` | pytest and fixture validator (Pillow) | running the test suite |
 | `requirements-calibration.txt` | PyQt5 for the calibration GUI | operator doing electrode placement |
 
-`requirements-calibration.txt` is separate because PyQt5 has no wheel on PyPI for aarch64. Linux ARM installs build from source and need `qtbase5-dev` first; x86_64 Linux, macOS, and Windows get wheels.
+`requirements-calibration.txt` is kept separate because PyQt5 has no wheel on PyPI for aarch64.
+On Linux ARM it builds from source and needs `qtbase5-dev` first, while x86_64 Linux, macOS, and Windows get wheels.
 
 ## Testing
 
@@ -123,20 +155,23 @@ pip install -r requirements-dev.txt
 python -m pytest tests/ -q
 ```
 
-Runs in about 10 seconds on a laptop. All local, no API calls.
+This takes about 10 seconds on a laptop and makes no API calls.
 
-The following scripts are not pytest and cost real API money to run:
+The scripts below are not part of pytest.
+The first two make real Claude calls, so they cost money:
 
-- `python tests/test_brain.py` — eight-case prompt eval. Requires `ANTHROPIC_API_KEY`. One Claude call per case.
-- `python tests/test_orchestrator_integration.py` — end-to-end trace against the mock receiver. Three Claude calls per run.
-- `python tests/measure_stop_latency.py` — priority-stop HTTP latency benchmark. No API calls, just local timing.
+- `python tests/test_brain.py` runs an eight-case prompt eval, one Claude call per case, and needs `ANTHROPIC_API_KEY`.
+- `python tests/test_orchestrator_integration.py` traces a full run against the mock receiver, with three Claude calls per run.
+- `python tests/measure_stop_latency.py` benchmarks the HTTP latency of a priority stop, using local timing only.
 
 ## Safety
 
-The full safety checklist lives at [docs/safety_checklist.md](docs/safety_checklist.md) — read it before powering the Belifu. The short version of the runtime invariants, also summarized at the top of [firmware/monday_ems/monday_ems.ino](firmware/monday_ems/monday_ems.ino) and [hardware/receiver.py](hardware/receiver.py):
+Read the full safety checklist in [docs/safety_checklist.md](docs/safety_checklist.md) before powering the Belifu.
+The runtime invariants are summarized below, and also at the top of [firmware/monday_ems/monday_ems.ino](firmware/monday_ems/monday_ems.ino) and [hardware/receiver.py](hardware/receiver.py).
 
-1. Physical kill switch on the EMS positive lead is the primary safety.
-2. Firmware enforces a channel mutex, a 3 s serial watchdog, a 2 s per-finger on-time cap, and boot-OFF.
-3. Bridge caps `duration_ms` at 1000, validates enum values, and serializes writes. `/stop` bypasses the command lock and returns in microseconds.
-4. Orchestrator adds a 500 ms abort window after every acknowledgement and scales durations down by confidence.
+1. The physical kill switch on the EMS positive lead is the primary safety.
+2. The firmware enforces a channel mutex, a 3 s serial watchdog, a 2 s per-finger on-time cap, and boot-OFF.
+3. The bridge caps `duration_ms` at 1000, validates enum values, and serializes writes.
+   `/stop` bypasses the command lock and returns in microseconds.
+4. The orchestrator adds a 500 ms abort window after every acknowledgement and scales durations down by confidence.
 5. Every layer assumes the layers above and below may fail.
